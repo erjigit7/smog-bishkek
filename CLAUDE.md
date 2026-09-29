@@ -2,6 +2,9 @@
 
 Local PM2.5 forecast for Bishkek, 1–3 days ahead, by district, delivered through a Telegram bot in Russian and Kyrgyz.
 
+Background research, rejected alternatives, competitors and verified data sources: `docs/CONTEXT.md` (Russian). Read it before changing the project's direction.
+The owner is learning Claude Code: explain non-obvious decisions briefly in Russian in PR descriptions.
+
 ## Why this exists
 Global models (CAMS, used by Open-Meteo and many weather apps) badly underestimate Bishkek winter smog.
 Baseline on winter 2025-11-01..2026-02-28 (`py -m smog.evaluate_cams`):
