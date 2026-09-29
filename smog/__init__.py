@@ -1,0 +1,1 @@
+"""Smog forecast for Bishkek."""
