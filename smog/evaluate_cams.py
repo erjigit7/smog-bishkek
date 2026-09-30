@@ -117,15 +117,20 @@ def main() -> None:
     for start, end in ranges_from_args(p, args):
         try:
             cams = load_cams(start, end)
-            rh = load_humidity(start, end)
         except FileNotFoundError:
-            print(f"\n{start}..{end}: no CAMS/weather files. Run smog.backfill for the same range first.")
+            print(f"\n{start}..{end}: no CAMS file. Run smog.backfill for the same range first.")
             continue
-        humid = sum(v >= 90 for v in rh.values()) / max(len(rh), 1)
-        print(f"\n#### {start}..{end}  (ERA5 humidity >= 90%: {humid:.0%} of hours)")
+        variants = [("raw", None)]
+        try:
+            rh = load_humidity(start, end)
+            humid = sum(v >= 90 for v in rh.values()) / max(len(rh), 1)
+            print(f"\n#### {start}..{end}  (ERA5 humidity >= 90%: {humid:.0%} of hours)")
+            variants.append(("humidity-corrected", rh))
+        except FileNotFoundError:
+            print(f"\n#### {start}..{end}  (no weather file: humidity-corrected score skipped)")
 
         season = f"{start.year}/{str(end.year)[2:]}" if (start.month, end.month) == (11, 2) else f"{start}..{end}"
-        for label, rh_arg in [("raw", None), ("humidity-corrected", rh)]:
+        for label, rh_arg in variants:
             observed = hourly_city_pm25(start, end, rh_arg)
             m = score(observed, cams)
             if m is None:

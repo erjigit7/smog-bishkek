@@ -60,9 +60,15 @@ def backfill_sensors(start: date, end: date) -> None:
 
 def backfill_hourly(start: date, end: date) -> None:
     # One request per source for the whole range; Open-Meteo handles long ranges fine.
-    write_csv(config.RAW_DIR / f"weather_{start}_{end}.csv", sources.weather_history(start, end))
-    write_csv(config.RAW_DIR / f"cams_{start}_{end}.csv", sources.cams_history(start, end))
-    print(f"Weather and CAMS saved for {start}..{end}")
+    for name, fetch in [("weather", sources.weather_history), ("cams", sources.cams_history)]:
+        path = config.RAW_DIR / f"{name}_{start}_{end}.csv"
+        if path.exists():
+            continue
+        try:
+            write_csv(path, fetch(start, end))
+            print(f"{name} saved for {start}..{end}")
+        except OSError as e:  # e.g. Open-Meteo's daily limit: keep going, re-run later
+            print(f"{name} for {start}..{end} failed ({e}); re-run backfill later to fetch it.")
 
 
 def add_range_args(p: argparse.ArgumentParser) -> None:
