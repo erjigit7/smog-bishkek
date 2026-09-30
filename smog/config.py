@@ -14,8 +14,20 @@ PM_SENSOR_TYPES = {"SDS011", "SPS30", "PMS5003", "PMS7003"}
 
 # Sensors known in Bishkek. The live API adds whatever is online today;
 # this list keeps sensors that have gone offline but still have archive history.
+# Found by `smog.find_sensors`, checked so far on the 2022/23 sample days only
+# (2023/24..2025/26 sample days still to run). Online/offline as of 2026-09-30.
 KNOWN_SENSORS = {
-    # id: type
+    # id: type,        lat, lon (from the archive)
+    33016: "SDS011",   # 42.923, 74.606  offline now
+    33527: "SDS011",   # 42.868, 74.608  offline now
+    34313: "SDS011",   # 42.885, 74.554  online
+    35677: "SDS011",   # 42.828, 74.582  offline now
+    35745: "SDS011",   # 42.812, 74.628  online
+    52798: "SDS011",   # 42.872, 74.622  online
+    55837: "SDS011",   # 42.850, 74.633  offline now
+    66706: "SDS011",   # 42.877, 74.581  offline now
+    67538: "SDS011",   # 42.882, 74.552  offline now
+    76617: "SDS011",   # 42.816, 74.648  offline now
 }
 
 # Heating seasons we study, by the year they start in: 2022 = 2022-11-01..2023-02-28.
