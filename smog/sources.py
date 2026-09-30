@@ -1,5 +1,6 @@
 """Clients for the open data sources. Standard library only."""
 import csv
+import http.client
 import io
 import json
 import re
@@ -14,7 +15,7 @@ from . import config
 USER_AGENT = "smog-bishkek/0.1 (open research project)"
 
 
-def _get(url: str, retries: int = 3, max_bytes: int | None = None) -> bytes | None:
+def _get(url: str, retries: int = 4, max_bytes: int | None = None) -> bytes | None:
     """GET a URL (or only its first max_bytes). Returns None on 404, raises after repeated other failures."""
     headers = {"User-Agent": USER_AGENT}
     if max_bytes:
@@ -32,7 +33,9 @@ def _get(url: str, retries: int = 3, max_bytes: int | None = None) -> bytes | No
                 return b""
             if attempt == retries - 1:
                 raise
-        except urllib.error.URLError:
+        except (OSError, http.client.HTTPException):
+            # URLError, timeouts, and dropped connections (RemoteDisconnected, IncompleteRead)
+            # happen now and then over thousands of requests: wait and retry.
             if attempt == retries - 1:
                 raise
         time.sleep(2 ** attempt)
