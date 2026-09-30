@@ -19,12 +19,9 @@ from . import config, humidity
 from .backfill import add_range_args, daterange, ranges_from_args
 
 
-def hourly_city_pm25(start: date, end: date, rh: dict[str, float] | None = None) -> dict[str, float]:
-    """Median across sensors of each sensor's hourly-mean PM2.5. Key: 'YYYY-MM-DDTHH:00:00'.
-
-    With rh (hour -> relative humidity %), SDS011 hourly means are humidity-corrected.
-    """
-    per_sensor_hour = defaultdict(list)
+def sensor_hourly_pm25(start: date, end: date) -> tuple[dict[str, dict[str, float]], dict[str, str]]:
+    """Each sensor's hourly-mean PM2.5: ({sensor_id: {'YYYY-MM-DDTHH:00:00': value}}, {sensor_id: type})."""
+    readings = defaultdict(lambda: defaultdict(list))
     sensor_types = {}
     for day in daterange(start, end):
         path = config.RAW_DIR / "sensors" / f"{day}.csv"
@@ -35,18 +32,26 @@ def hourly_city_pm25(start: date, end: date, rh: dict[str, float] | None = None)
                 pm25 = float(r["pm25"])
                 if not 0 <= pm25 < 1000:  # drop obvious sensor faults
                     continue
-                hour = r["timestamp"][:13] + ":00:00"
-                per_sensor_hour[(r["sensor_id"], hour)].append(pm25)
+                readings[r["sensor_id"]][r["timestamp"][:13] + ":00:00"].append(pm25)
                 # Files from before the sensor_type column: all Bishkek sensors then were SDS011.
                 sensor_types[r["sensor_id"]] = r.get("sensor_type") or config.KNOWN_SENSORS.get(
                     int(r["sensor_id"]), "SDS011")
+    means = {sid: {h: statistics.mean(v) for h, v in hours.items()} for sid, hours in readings.items()}
+    return means, sensor_types
 
+
+def hourly_city_pm25(start: date, end: date, rh: dict[str, float] | None = None) -> dict[str, float]:
+    """Median across sensors of each sensor's hourly-mean PM2.5. Key: 'YYYY-MM-DDTHH:00:00'.
+
+    With rh (hour -> relative humidity %), SDS011 hourly means are humidity-corrected.
+    """
+    per_sensor, sensor_types = sensor_hourly_pm25(start, end)
     by_hour = defaultdict(list)
-    for (sid, hour), values in per_sensor_hour.items():
-        value = statistics.mean(values)
-        if rh is not None and sensor_types[sid] == "SDS011":
-            value = humidity.correct_pm(value, rh.get(hour))
-        by_hour[hour].append(value)
+    for sid, hours in per_sensor.items():
+        for hour, value in hours.items():
+            if rh is not None and sensor_types[sid] == "SDS011":
+                value = humidity.correct_pm(value, rh.get(hour))
+            by_hour[hour].append(value)
     # Median is robust to one broken or badly placed sensor.
     return {h: statistics.median(v) for h, v in by_hour.items() if len(v) >= 2}
 

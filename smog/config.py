@@ -36,6 +36,12 @@ KNOWN_SENSORS = {
     83895: "SDS011",   # 42.836, 74.622  online, since Dec 2025
 }
 
+# US Embassy PM2.5 monitor: the only regulatory-grade reference with public hourly history.
+# Sensor 35677 stood ~50 m from it and reported in winters 2021/22 and 2022/23,
+# which makes calibration possible.
+EMBASSY_LAT, EMBASSY_LON = 42.8277, 74.5830
+COLOCATED_SENSOR = 35677
+
 # Heating seasons we study, by the year they start in: 2022 = 2022-11-01..2023-02-28.
 # Always ends on 28 Feb (also in leap years) so every season has the same 120 days.
 SEASONS = [2022, 2023, 2024, 2025]

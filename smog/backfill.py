@@ -71,6 +71,19 @@ def backfill_hourly(start: date, end: date) -> None:
             print(f"{name} for {start}..{end} failed ({e}); re-run backfill later to fetch it.")
 
 
+def backfill_reference() -> None:
+    """US Embassy reference monitor, whole history in one file (it stopped publishing in 2024)."""
+    path = config.RAW_DIR / "embassy_pm25.csv"
+    if path.exists():
+        return
+    try:
+        rows = sources.embassy_history()
+        write_csv(path, rows)
+        print(f"embassy reference saved: {len(rows)} hours")
+    except OSError as e:
+        print(f"embassy reference failed ({e}); re-run backfill later to fetch it.")
+
+
 def add_range_args(p: argparse.ArgumentParser) -> None:
     """--start/--end, or --season YEAR, or --all-seasons. Shared with evaluate_cams."""
     p.add_argument("--start", type=date.fromisoformat)
@@ -94,6 +107,7 @@ def main() -> None:
     add_range_args(p)
     args = p.parse_args()
 
+    backfill_reference()
     for start, end in ranges_from_args(p, args):
         backfill_hourly(start, end)
         backfill_sensors(start, end)

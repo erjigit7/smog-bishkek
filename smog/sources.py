@@ -8,7 +8,8 @@ import time
 import zlib
 import urllib.error
 import urllib.request
-from datetime import date
+import zipfile
+from datetime import date, datetime, timedelta
 
 from . import config
 
@@ -183,3 +184,44 @@ def _hourly_rows(payload: dict) -> list[dict]:
         {"timestamp": t + ":00", **{k: hourly[k][i] for k in keys}}
         for i, t in enumerate(hourly["time"])
     ]
+
+
+# --- US Embassy Bishkek reference monitor ----------------------------------
+
+# AirNow removed the embassy files in March 2025; this public Kaggle dataset mirrors them
+# (no login needed). If it ever disappears, download the zip by hand to data/raw/airnow-bishkek.zip.
+EMBASSY_URL = "https://www.kaggle.com/api/v1/datasets/download/pavelisayenko/airnow-bishkek"
+
+# Hours to move a file's labels back. Found by correlating with sensor 35677, 50 m away:
+# the 2022 and 2023 files match best as they are (r 0.96-0.98), the 2021 file one hour
+# earlier (r 0.92 vs 0.79); it also starts at 02:00 on 1 Jan instead of 01:00 and ends
+# with an hour that the 2022 file has with a different value. The 2019, 2020 and 2024
+# files could not be checked (no co-located sensor data) and are taken as they are.
+EMBASSY_FILE_SHIFT_HOURS = {"Bishkek_PM2.5_2021_YTD.csv": 1}
+
+
+def embassy_history() -> list[dict]:
+    """Hourly PM2.5 of the US Embassy monitor (EPA-approved), Feb 2019 .. Feb 2024.
+
+    Returns [{timestamp, pm25}] for hours flagged 'Valid', timestamp = UTC start of the hour,
+    the same convention as our sensor hours.
+    """
+    local_zip = config.RAW_DIR / "airnow-bishkek.zip"
+    raw = local_zip.read_bytes() if local_zip.exists() else _get(EMBASSY_URL)
+    if raw is None:
+        raise FileNotFoundError(f"{EMBASSY_URL} is gone; download the dataset by hand to {local_zip}")
+    hours = {}
+    with zipfile.ZipFile(io.BytesIO(raw)) as z:
+        for name in sorted(z.namelist()):
+            if not name.endswith(".csv"):
+                continue
+            shift = timedelta(hours=7 + EMBASSY_FILE_SHIFT_HOURS.get(name, 0))
+            for r in csv.DictReader(io.TextIOWrapper(z.open(name), encoding="utf-8-sig")):
+                if r["QC Name"] != "Valid":
+                    continue
+                # "Date (LT)" is Bishkek time (UTC+6) at the END of the averaging hour:
+                # 13:00 = mean of 12:00-13:00. Checked against sensor 35677, 50 m away:
+                # r = 0.97 with this shift, 0.88 without it.
+                end_local = datetime(int(r["Year"]), int(r["Month"]), int(r["Day"])) + timedelta(hours=int(r["Hour"]))
+                hours[end_local - shift] = float(r["Raw Conc."])
+    return [{"timestamp": t.isoformat(), "pm25": v} for t, v in sorted(hours.items())]
