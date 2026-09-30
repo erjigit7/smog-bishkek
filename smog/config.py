@@ -1,4 +1,5 @@
 """Project-wide settings. All timestamps in the project are UTC."""
+from datetime import date
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -16,6 +17,14 @@ PM_SENSOR_TYPES = {"SDS011", "SPS30", "PMS5003", "PMS7003"}
 KNOWN_SENSORS = {
     # id: type
 }
+
+# Heating seasons we study, by the year they start in: 2022 = 2022-11-01..2023-02-28.
+# Always ends on 28 Feb (also in leap years) so every season has the same 120 days.
+SEASONS = [2022, 2023, 2024, 2025]
+
+
+def season_range(start_year: int) -> tuple[date, date]:
+    return date(start_year, 11, 1), date(start_year + 1, 2, 28)
 
 # Weather variables that drive winter smog: inversions, stagnant air, cold (= more heating).
 WEATHER_VARS = [

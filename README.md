@@ -18,6 +18,7 @@
 py -m smog.backfill --start 2025-11-01 --end 2026-02-28
 py -m smog.evaluate_cams --start 2025-11-01 --end 2026-02-28
 ```
+Все отопительные сезоны с 2022/23: `py -m smog.backfill --all-seasons`, затем `py -m smog.evaluate_cams --all-seasons`.
 
 ## Данные
 - [sensor.community](https://sensor.community) — народные датчики PM2.5

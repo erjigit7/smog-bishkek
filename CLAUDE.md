@@ -26,18 +26,24 @@ Every model we build must beat these numbers on the same metrics.
 - Run modules as `py -m smog.<module>` (Windows) or `python -m smog.<module>`.
 - `data/` is not committed; recreate with `smog.backfill`.
 - Be polite to sensor.community (volunteer-run): keep the delay between requests.
-- SDS011 sensors overestimate PM at high humidity; humidity correction is a planned step, not done yet.
+- SDS011 sensors overestimate PM at high humidity. `smog/humidity.py` corrects them with the kappa-Koehler formula (gamma 0.22, sensor.community wiki) using ERA5 humidity. gamma is not calibrated for Bishkek, so always report raw and corrected numbers side by side.
+- Heating season = 1 Nov .. 28 Feb (28 Feb also in leap years), named by its start year: season 2022 = 2022/23. List in `config.SEASONS`.
 
 ## Commands
 ```
-py -m smog.backfill --start 2025-11-01 --end 2026-02-28
-py -m smog.evaluate_cams --start 2025-11-01 --end 2026-02-28
+py -m smog.find_sensors                  # sensors in Bishkek on sample days of past winters -> KNOWN_SENSORS
+py -m smog.backfill --all-seasons        # or --season 2022, or --start/--end
+py -m smog.evaluate_cams --all-seasons   # raw + humidity-corrected, prints a Markdown table
 ```
+
+## CAMS baseline by season
+Not filled yet: the cloud session that wrote the code had no network access to the data hosts.
+Run the three commands above and paste the table printed by `evaluate_cams --all-seasons` here.
 
 ## Roadmap
 1. [x] Data sources + backfill of last winter
 2. [x] CAMS baseline evaluation
-3. [ ] Backfill earlier winters (2022–2025), humidity correction for SDS011
+3. [ ] Backfill earlier winters (2022–2025), humidity correction for SDS011 — code done (`find_sensors`, `--season`, `humidity.py`); data download and per-season numbers pending
 4. [ ] Feature table: weather + lagged PM + hour/weekday/heating-season flags
 5. [ ] First model (gradient boosting) for city PM2.5 at +24h/+48h; compare with baseline
 6. [ ] Daily forecast job + storage
