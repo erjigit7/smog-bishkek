@@ -164,6 +164,18 @@ def weather_history(start: date, end: date) -> list[dict]:
     return _hourly_rows(json.loads(_get(url)))
 
 
+def weather_recent(past_days: int = 3) -> list[dict]:
+    """Hourly weather for the last days from the Open-Meteo forecast API (model analysis for past
+    hours). ERA5 arrives ~5 days late, so the daily forecast job uses this instead."""
+    url = (
+        "https://api.open-meteo.com/v1/forecast"
+        f"?latitude={config.CITY_LAT}&longitude={config.CITY_LON}"
+        f"&past_days={past_days}&forecast_days=2"
+        f"&hourly={','.join(config.WEATHER_VARS)}&timezone=UTC"
+    )
+    return _hourly_rows(json.loads(_get(url)))
+
+
 def cams_history(start: date, end: date) -> list[dict]:
     """Hourly PM2.5/PM10 from the global CAMS model (what Open-Meteo, and many apps, show)."""
     url = (

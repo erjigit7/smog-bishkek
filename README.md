@@ -27,6 +27,11 @@ py -m smog.features
 py -m smog.train
 ```
 
+Ежедневный прогноз на завтра (запускается GitHub Actions в 09:45 по Бишкеку, результаты в `forecasts/forecasts.csv`):
+```
+py -m smog.forecast --date 2026-01-20 --dry-run
+```
+
 ## Данные
 - [sensor.community](https://sensor.community) — народные датчики PM2.5
 - [Open-Meteo](https://open-meteo.com) — погода (ERA5) и глобальная модель CAMS

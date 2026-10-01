@@ -1,0 +1,38 @@
+# Daily morning forecast for tomorrow (roadmap item 6), see smog/forecast.py.
+# Commits forecasts/forecasts.csv: each new forecast, and later what actually happened.
+name: Daily smog forecast
+
+on:
+  schedule:
+    # 03:45 UTC = 09:45 Bishkek: sensor.community publishes yesterday's archive at ~03:30 UTC.
+    - cron: "45 3 * * *"
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "Forecast even outside the heating season (the model only knows Nov-Feb)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency: daily-forecast
+
+jobs:
+  forecast:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - run: python -m smog.forecast ${{ inputs.force && '--force' || '' }}
+      - name: Commit forecasts
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add forecasts/forecasts.csv
+          git diff --cached --quiet || (git commit -m "Forecast $(date -u +%F)" && git push)

@@ -1,0 +1,1 @@
+issued_at_utc,run_date,target_date,data_until_utc,status,p_raw,p_calibrated,risk,alert,mean_pm25,category,pm_at_cutoff,n_sensors,model_trained_on,observed_unhealthy_h,observed_mean,observed_unhealthy_day,note
