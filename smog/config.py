@@ -1,4 +1,5 @@
 """Project-wide settings. All timestamps in the project are UTC."""
+from datetime import date
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -13,9 +14,41 @@ PM_SENSOR_TYPES = {"SDS011", "SPS30", "PMS5003", "PMS7003"}
 
 # Sensors known in Bishkek. The live API adds whatever is online today;
 # this list keeps sensors that have gone offline but still have archive history.
+# Every SDS011 that reported from Bishkek in winters 2022/23..2025/26. Found by
+# `smog.find_sensors` (2022/23 sample days) plus 83895 from the live API.
+# Completeness check against sensor.community's own daily SDS011 count for KG
+# (archive.sensor.community/sensors_per_country_per_day.json): on all 480 season days
+# KG count - our reporting sensors is 0..2 (0 on every day since Nov 2024); on the days
+# checked the difference is exactly the two southern sensors 42866, 42876.
+# Online/offline as of 2026-09-30.
 KNOWN_SENSORS = {
-    # id: type
+    # id: type,        lat, lon (from the archive)
+    33016: "SDS011",   # 42.923, 74.606  offline now
+    33527: "SDS011",   # 42.868, 74.608  offline now
+    34313: "SDS011",   # 42.885, 74.554  online
+    35677: "SDS011",   # 42.828, 74.582  offline now
+    35745: "SDS011",   # 42.812, 74.628  online
+    52798: "SDS011",   # 42.872, 74.622  online
+    55837: "SDS011",   # 42.850, 74.633  offline now
+    66706: "SDS011",   # 42.877, 74.581  offline now
+    67538: "SDS011",   # 42.882, 74.552  offline now
+    76617: "SDS011",   # 42.816, 74.648  offline now
+    83895: "SDS011",   # 42.836, 74.622  online, since Dec 2025
 }
+
+# US Embassy PM2.5 monitor: the only regulatory-grade reference with public hourly history.
+# Sensor 35677 stood ~50 m from it and reported in winters 2021/22 and 2022/23,
+# which makes calibration possible.
+EMBASSY_LAT, EMBASSY_LON = 42.8277, 74.5830
+COLOCATED_SENSOR = 35677
+
+# Heating seasons we study, by the year they start in: 2022 = 2022-11-01..2023-02-28.
+# Always ends on 28 Feb (also in leap years) so every season has the same 120 days.
+SEASONS = [2022, 2023, 2024, 2025]
+
+
+def season_range(start_year: int) -> tuple[date, date]:
+    return date(start_year, 11, 1), date(start_year + 1, 2, 28)
 
 # Weather variables that drive winter smog: inversions, stagnant air, cold (= more heating).
 WEATHER_VARS = [

@@ -2,6 +2,8 @@
 
 Usage:
     py -m smog.backfill --start 2025-11-01 --end 2026-02-28
+    py -m smog.backfill --season 2022        # 2022-11-01..2023-02-28
+    py -m smog.backfill --all-seasons        # every season in config.SEASONS
 
 Writes to data/raw/. Days already downloaded are skipped, so the command can be re-run.
 """
@@ -33,7 +35,11 @@ def daterange(start: date, end: date):
 
 
 def backfill_sensors(start: date, end: date) -> None:
-    sensors = {sid: meta["type"] for sid, meta in sources.live_sensors().items()}
+    try:
+        sensors = {sid: meta["type"] for sid, meta in sources.live_sensors().items()}
+    except OSError as e:  # past seasons only need KNOWN_SENSORS
+        print(f"Live API unavailable ({e}); using KNOWN_SENSORS only.")
+        sensors = {}
     sensors.update(config.KNOWN_SENSORS)
     print(f"Sensors: {len(sensors)} -> {sorted(sensors)}")
 
@@ -45,7 +51,7 @@ def backfill_sensors(start: date, end: date) -> None:
         rows = []
         for sid, stype in sensors.items():
             for r in sources.sensor_day(sid, stype, day):
-                rows.append({"sensor_id": sid, **r})
+                rows.append({"sensor_id": sid, "sensor_type": stype, **r})
             time.sleep(0.2)  # be polite to a volunteer-run archive
         write_csv(path, rows)
         active = len({r["sensor_id"] for r in rows})
@@ -54,19 +60,57 @@ def backfill_sensors(start: date, end: date) -> None:
 
 def backfill_hourly(start: date, end: date) -> None:
     # One request per source for the whole range; Open-Meteo handles long ranges fine.
-    write_csv(config.RAW_DIR / f"weather_{start}_{end}.csv", sources.weather_history(start, end))
-    write_csv(config.RAW_DIR / f"cams_{start}_{end}.csv", sources.cams_history(start, end))
-    print(f"Weather and CAMS saved for {start}..{end}")
+    for name, fetch in [("weather", sources.weather_history), ("cams", sources.cams_history)]:
+        path = config.RAW_DIR / f"{name}_{start}_{end}.csv"
+        if path.exists():
+            continue
+        try:
+            write_csv(path, fetch(start, end))
+            print(f"{name} saved for {start}..{end}")
+        except OSError as e:  # e.g. Open-Meteo's daily limit: keep going, re-run later
+            print(f"{name} for {start}..{end} failed ({e}); re-run backfill later to fetch it.")
+
+
+def backfill_reference() -> None:
+    """US Embassy reference monitor, whole history in one file (it stopped publishing in 2024)."""
+    path = config.RAW_DIR / "embassy_pm25.csv"
+    if path.exists():
+        return
+    try:
+        rows = sources.embassy_history()
+        write_csv(path, rows)
+        print(f"embassy reference saved: {len(rows)} hours")
+    except OSError as e:
+        print(f"embassy reference failed ({e}); re-run backfill later to fetch it.")
+
+
+def add_range_args(p: argparse.ArgumentParser) -> None:
+    """--start/--end, or --season YEAR, or --all-seasons. Shared with evaluate_cams."""
+    p.add_argument("--start", type=date.fromisoformat)
+    p.add_argument("--end", type=date.fromisoformat)
+    p.add_argument("--season", type=int, help="heating season by start year: 2022 = 2022-11-01..2023-02-28")
+    p.add_argument("--all-seasons", action="store_true", help=f"every season in config.SEASONS {config.SEASONS}")
+
+
+def ranges_from_args(p: argparse.ArgumentParser, args) -> list[tuple[date, date]]:
+    if args.all_seasons:
+        return [config.season_range(y) for y in config.SEASONS]
+    if args.season:
+        return [config.season_range(args.season)]
+    if args.start and args.end:
+        return [(args.start, args.end)]
+    p.error("give --start and --end, or --season, or --all-seasons")
 
 
 def main() -> None:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--start", type=date.fromisoformat, required=True)
-    p.add_argument("--end", type=date.fromisoformat, required=True)
+    add_range_args(p)
     args = p.parse_args()
 
-    backfill_hourly(args.start, args.end)
-    backfill_sensors(args.start, args.end)
+    backfill_reference()
+    for start, end in ranges_from_args(p, args):
+        backfill_hourly(start, end)
+        backfill_sensors(start, end)
 
 
 if __name__ == "__main__":
