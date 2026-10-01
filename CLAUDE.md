@@ -16,7 +16,10 @@ The sensors themselves read low: against the US Embassy reference monitor the ci
 was 0.90× (2021/22) and 0.56× (2022/23) of the truth (`py -m smog.compare_reference`).
 So real smog is worse than these numbers, and CAMS misses it by even more.
 
-Every model we build must beat these numbers on the same metrics.
+Every model we build must beat these numbers on the same metrics, and also the simplest
+forecast "PM2.5 at t+24h = PM2.5 now" (persistence; `py -m smog.features`, all 4 seasons, hourly city median):
+- +24h: persistence MAE 23.1, unhealthy caught 1178/2384; CAMS MAE 26.4, caught 0/2384
+- +48h: persistence MAE 28.1, unhealthy caught 870/2374; CAMS MAE 26.5, caught 0/2374
 
 ## Data sources (all open, no keys)
 - sensor.community archive: per-sensor daily CSV. Current year at `/<day>/`, past years at `/<year>/<day>/*.csv.gz`.
@@ -40,7 +43,14 @@ py -m smog.find_sensors                  # sensors in Bishkek on sample days of 
 py -m smog.backfill --all-seasons        # or --season 2022, or --start/--end
 py -m smog.evaluate_cams --all-seasons   # raw + humidity-corrected, prints a Markdown table
 py -m smog.backfill --season 2021 && py -m smog.compare_reference --season 2021 --season 2022   # sensors vs embassy
+py -m smog.features                      # data/features.csv: one row per hour, targets y_24 / y_48
 ```
+
+## Feature table (`smog/features.py`)
+- Target: raw city median PM2.5 at t+24h / t+48h, same series as the baseline.
+- `pm_*`, `now_*`, calendar columns are known at forecast time.
+- `era5_24_*`, `era5_48_*`, `cams_*` are OBSERVED weather at the target hour, i.e. a perfect weather forecast. Archived day-ahead forecasts (Open-Meteo previous-runs API) have no boundary layer height at all and most other variables only from winter 2024/25. Always score models with and without these columns; real skill lies in between.
+- ERA5 boundary layer height is missing in Open-Meteo for Jan–Feb 2024 (also with `models=era5`); left empty.
 
 ## CAMS baseline by season
 Output of `py -m smog.evaluate_cams --all-seasons` (2026-09-30). City value = median of the sensors' hourly means, hours with ≥ 2 sensors.
@@ -73,7 +83,7 @@ Output of `py -m smog.compare_reference --season 2021 --season 2022` (2026-09-30
 1. [x] Data sources + backfill of last winter
 2. [x] CAMS baseline evaluation
 3. [x] Backfill earlier winters (2022–2025), humidity correction for SDS011 (gamma fitted against the embassy reference)
-4. [ ] Feature table: weather + lagged PM + hour/weekday/heating-season flags
+4. [x] Feature table: weather + lagged PM + hour/weekday/heating-season flags (`smog.features`)
 5. [ ] First model (gradient boosting) for city PM2.5 at +24h/+48h; compare with baseline
 6. [ ] Daily forecast job + storage
 7. [ ] Telegram bot (RU/KG): daily morning forecast, alerts, "when to ventilate"
