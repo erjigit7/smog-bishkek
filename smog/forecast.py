@@ -183,38 +183,56 @@ def main() -> None:
     for r in rows:
         t = date.fromisoformat(r["target_date"])
         if r["status"] == "ok" and r["observed_mean"] == "" and t < today:
-            obs = observe(t)
+            try:
+                obs = observe(t)
+            except OSError as e:  # archive unreachable: try again on the next run
+                print(f"Could not verify {t} yet ({e})")
+                continue
             if obs:
                 r.update(obs)
                 print(f"Verified {t}: forecast risk {r['risk']}, alert {r['alert']}; observed "
                       f"{obs['observed_unhealthy_h']} unhealthy h, mean {obs['observed_mean']}")
+    if not args.dry_run:
+        save_rows(rows)  # keep the verification even if the forecast below fails
 
     # 2-3. Tomorrow's forecast.
-    if any(r["target_date"] == target.isoformat() for r in rows):
+    failed = False
+    if any(r["target_date"] == target.isoformat() and r["status"] == "ok" for r in rows):
         print(f"A forecast for {target} already exists; not adding another.")
     elif not in_season(target) and not args.force:
         print(f"{target} is outside the heating season (Nov-Feb) the model was trained on; no forecast.")
     else:
+        rows = [r for r in rows if r["target_date"] != target.isoformat()]  # replace an earlier failed attempt
         with MODEL_PATH.with_suffix(".json").open(encoding="utf-8") as f:
             trained_on = "+".join(str(s) for s in json.load(f)["trained_on_seasons"])
-        x, cutoff = build_inputs(run_date, today)
         row = {"issued_at_utc": now.isoformat(timespec="minutes"), "run_date": run_date.isoformat(),
-               "target_date": target.isoformat(), "data_until_utc": cutoff.isoformat(),
-               "pm_at_cutoff": x["pm_now"] if x["pm_now"] is not None else "", "n_sensors": x["n_sensors"],
-               "model_trained_on": trained_on, "note": "" if in_season(target) else "outside heating season"}
-        if x["pm_now"] is None:
-            # The model never saw a day without a city value at the cutoff: do not guess.
-            row["status"] = "no forecast: fewer than 2 sensors at the data cutoff"
+               "target_date": target.isoformat(), "model_trained_on": trained_on,
+               "note": "" if in_season(target) else "outside heating season"}
+        try:
+            x, cutoff = build_inputs(run_date, today)
+        except OSError as e:
+            # A data source is down (e.g. Open-Meteo rate limit): record it, never guess.
+            row["status"] = f"no forecast: data source unavailable ({e})"
+            failed = True
             print(row["status"])
         else:
-            row.update(predict(x), status="ok")
-            print(message_ru(target, row))
-        print("Inputs:", {k: (round(v, 2) if isinstance(v, float) else v) for k, v in x.items()})
+            row.update({"data_until_utc": cutoff.isoformat(), "n_sensors": x["n_sensors"],
+                        "pm_at_cutoff": x["pm_now"] if x["pm_now"] is not None else ""})
+            if x["pm_now"] is None:
+                # The model never saw a day without a city value at the cutoff: do not guess.
+                row["status"] = "no forecast: fewer than 2 sensors at the data cutoff"
+                print(row["status"])
+            else:
+                row.update(predict(x), status="ok")
+                print(message_ru(target, row))
+            print("Inputs:", {k: (round(v, 2) if isinstance(v, float) else v) for k, v in x.items()})
         rows.append(row)
 
     if not args.dry_run:
         save_rows(rows)
         print(f"Saved {OUT} ({len(rows)} rows)")
+    if failed:
+        raise SystemExit(1)  # red run in GitHub Actions -> the owner gets an e-mail; the CSV is still committed
 
 
 if __name__ == "__main__":

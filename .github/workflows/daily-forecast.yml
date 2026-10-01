@@ -31,6 +31,7 @@ jobs:
       - run: pip install -r requirements.txt
       - run: python -m smog.forecast ${{ inputs.force && '--force' || '' }}
       - name: Commit forecasts
+        if: always()  # also after a failed forecast: keeps the verification and the "no forecast" row
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"

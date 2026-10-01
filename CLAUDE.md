@@ -102,6 +102,7 @@ Notes:
 - GitHub Actions runs it every day at 03:45 UTC (09:45 Bishkek) and commits `forecasts/forecasts.csv`.
 - Each run: first fills in what actually happened (observed_*) for earlier forecasts whose day is published, then forecasts tomorrow with `models/alert.pkl`. Only for targets in Nov–Feb (the model knows nothing else); `--force` overrides, and a forced October run indeed raised a nonsense warning at 7 µg/m³.
 - If fewer than 2 sensors report at the data cutoff, it records "no forecast" instead of guessing (the model never saw such inputs).
+- If a data source is down (Open-Meteo answers 429 or drops connections from shared IPs), it records "no forecast: data source unavailable", exits 1 (red run, e-mail to the owner) and still commits the CSV; verification is saved before the forecast step, and the next run (or a manual re-run) replaces the failed row.
 - Inputs are built the same way as in training; checked on 3 past dates (2025-12-15, 2026-01-20, 2024-01-10): all 22 inputs identical to the training rows.
 - Weather "now" comes from the Open-Meteo forecast API (ERA5 is ~5 days late); training used ERA5. Small, accepted mismatch.
 - Live accuracy = compare risk/alert/mean_pm25 with observed_* in `forecasts/forecasts.csv`. Retrain after each winter: `py -m smog.features && py -m smog.alerts --save`.
