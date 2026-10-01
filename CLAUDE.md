@@ -33,7 +33,8 @@ forecast "PM2.5 at t+24h = PM2.5 now" (persistence; `py -m smog.features`, all 4
 - Data layer (`smog/sources.py`, `smog/backfill.py`) uses the standard library only. Modelling (`smog/train.py`) uses numpy + scikit-learn (`requirements.txt`).
 - Never tune or select anything on a test winter: score on winters the model did not see (leave-one-season-out, or train ≤2024/25 / test 2025/26).
 - Run modules as `py -m smog.<module>` (Windows) or `python -m smog.<module>`.
-- `data/` is not committed; recreate with `smog.backfill`.
+- `data/` is not committed; recreate with `smog.backfill`. Committed on purpose: `models/` (the trained alert model the daily job loads) and `forecasts/forecasts.csv` (written by the daily GitHub Action).
+- `requirements.txt` pins exact versions: `models/alert.pkl` is a pickle and only loads reliably with the same scikit-learn. After upgrading, retrain with `py -m smog.alerts --save`.
 - Be polite to sensor.community (volunteer-run): keep the delay between requests.
 - SDS011 sensors overestimate PM at high humidity. `smog/humidity.py` corrects that with the kappa-Koehler formula, gamma 0.05 fitted against the embassy monitor (the wiki value 0.22 was 2–3× too strong for Bishkek). The correction only removes the humidity part: SDS011 also reads 0.4–0.6× of the reference in dry air, so corrected values are still too low. Report raw and corrected side by side.
 - Heating season = 1 Nov .. 28 Feb (28 Feb also in leap years), named by its start year: season 2022 = 2022/23. List in `config.SEASONS`.
@@ -47,6 +48,9 @@ py -m smog.backfill --season 2021 && py -m smog.compare_reference --season 2021 
 py -m smog.features                      # data/features.csv: one row per hour, targets y_24 / y_48
 pip install -r requirements.txt && py -m smog.train   # first model vs persistence and CAMS
 py -m smog.alerts                        # morning alert: "tomorrow >= 3 unhealthy hours?" + tomorrow's mean
+py -m smog.alerts --save                 # train on all winters -> models/alert.pkl (+ alert.json)
+py -m smog.forecast                      # the daily job: verify past forecasts, forecast tomorrow
+py -m smog.forecast --date 2026-01-20 --dry-run   # as if run that morning
 ```
 
 ## Feature table (`smog/features.py`)
@@ -78,21 +82,29 @@ Notes:
 - Most useful inputs (+24h, permutation importance on 2025/26): surface pressure, hour of day, PM2.5 now, temperature.
 
 ## Alert model (`smog/alerts.py`)
-The bot's morning message: issued 08:00 Bishkek time about the next calendar day. Unhealthy day = ≥ 3 hours with city PM2.5 ≥ 55.4 (222 of 472 winter days, 47%). Probability threshold chosen on the training winters only (out-of-fold), the highest one that still catches 80% of their unhealthy days.
+The bot's morning message about the next calendar day (Bishkek time). It may only use data up to 23:00 UTC the day before (05:00 Bishkek): sensor.community publishes a day's archive at ~03:26 UTC next morning (checked via Last-Modified). Unhealthy day = ≥ 3 hours with city PM2.5 ≥ 55.4 (222 of 468 winter days, 47%). Probability threshold chosen on the training winters only (out-of-fold), the highest one that still catches 80% of their unhealthy days.
 Output of `py -m smog.alerts` (2026-10-01), leave-one-season-out, all 4 winters:
 
 | Method | Unhealthy days caught | False alarms | Right when it warns | Tomorrow's mean: MAE | Same category |
 |---|---|---|---|---|---|
-| persistence (yesterday) | 132 of 222 (59%) | 87 of 250 | 60% | 20.1 | 52% |
-| CAMS | 0 of 222 | 0 | — | 24.9 | 39% |
-| model, at 08:00 | 174 of 222 (78%) | 132 of 250 | 57% | 16.8 | 56% |
-| model, + perfect weather | 176 of 222 (79%) | 90 of 250 | 66% | 15.0 | 61% |
+| persistence (last 24 h) | 132 of 222 (59%) | 86 of 246 | 61% | 20.5 | 51% |
+| CAMS | 0 of 222 | 0 | — | 25.1 | 38% |
+| model, at forecast time | 167 of 222 (75%) | 131 of 246 | 56% | 18.1 | 54% |
+| model, + perfect weather | 165 of 222 (74%) | 102 of 246 | 62% | 15.4 | 63% |
 
 Notes:
-- With the same number of warnings as persistence (219), the model catches 140 vs 132 and raises 79 vs 87 false alarms: better, but modestly. Its extra catches come mostly from warning more often, by design.
-- Not uniform: in 2025/26 the 08:00 model caught 32 of 58 (55%) vs persistence 36 (62%).
-- The probability is not calibrated (days with P 0–0.2 were unhealthy 29% of the time, P 0.8–1.0 only 74%). Do not show raw percentages to users; use words (low / medium / high) until it is calibrated.
-- Tomorrow's mean PM2.5: the model beats persistence and CAMS clearly (MAE 16.8 vs 20.1 vs 24.9).
+- With the same number of warnings as persistence (218), the model catches 142 vs 132 and raises 76 vs 86 false alarms: better, but modestly. Its extra catches come mostly from warning more often, by design.
+- Not uniform: in 2025/26 the model caught 29 of 57 (51%) vs persistence 36 (63%).
+- The raw probability is overconfident (P 0–0.2: 32% of those days were unhealthy; P 0.8–1.0: 76%). `--save` fits an isotonic calibrator on out-of-fold predictions and the daily job reports words (low < 0.3 ≤ medium < 0.6 ≤ high) from the calibrated value. Whether that calibration holds is only shown by the live forecasts.
+- Tomorrow's mean PM2.5: the model beats persistence and CAMS (MAE 18.1 vs 20.5 vs 25.1).
+
+## Daily forecast (`smog/forecast.py`, `.github/workflows/daily-forecast.yml`)
+- GitHub Actions runs it every day at 03:45 UTC (09:45 Bishkek) and commits `forecasts/forecasts.csv`.
+- Each run: first fills in what actually happened (observed_*) for earlier forecasts whose day is published, then forecasts tomorrow with `models/alert.pkl`. Only for targets in Nov–Feb (the model knows nothing else); `--force` overrides, and a forced October run indeed raised a nonsense warning at 7 µg/m³.
+- If fewer than 2 sensors report at the data cutoff, it records "no forecast" instead of guessing (the model never saw such inputs).
+- Inputs are built the same way as in training; checked on 3 past dates (2025-12-15, 2026-01-20, 2024-01-10): all 22 inputs identical to the training rows.
+- Weather "now" comes from the Open-Meteo forecast API (ERA5 is ~5 days late); training used ERA5. Small, accepted mismatch.
+- Live accuracy = compare risk/alert/mean_pm25 with observed_* in `forecasts/forecasts.csv`. Retrain after each winter: `py -m smog.features && py -m smog.alerts --save`.
 
 ## CAMS baseline by season
 Output of `py -m smog.evaluate_cams --all-seasons` (2026-09-30). City value = median of the sensors' hourly means, hours with ≥ 2 sensors.
@@ -127,6 +139,6 @@ Output of `py -m smog.compare_reference --season 2021 --season 2022` (2026-09-30
 3. [x] Backfill earlier winters (2022–2025), humidity correction for SDS011 (gamma fitted against the embassy reference)
 4. [x] Feature table: weather + lagged PM + hour/weekday/heating-season flags (`smog.features`)
 5. [x] First model (gradient boosting) for city PM2.5 at +24h/+48h; compare with baseline (`smog.train`; next: alert-oriented model, daily summary)
-6. [ ] Daily forecast job + storage
+6. [x] Daily forecast job + storage (`smog.forecast`, GitHub Actions, `forecasts/forecasts.csv` with live verification)
 7. [ ] Telegram bot (RU/KG): daily morning forecast, alerts, "when to ventilate"
 8. [ ] Per-district forecasts once enough sensors

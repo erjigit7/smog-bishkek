@@ -1,0 +1,52 @@
+{
+  "trained_on_seasons": [
+    2022,
+    2023,
+    2024,
+    2025
+  ],
+  "days": 468,
+  "threshold": 0.15,
+  "unhealthy_day": ">= 3 h with city PM2.5 >= 55.4",
+  "data_cutoff": "23:00 UTC of the previous day",
+  "features": [
+    "pm_now",
+    "pm_lag1h",
+    "pm_lag3h",
+    "pm_lag6h",
+    "pm_lag12h",
+    "pm_lag24h",
+    "pm_lag48h",
+    "pm_mean24h",
+    "pm_max24h",
+    "n_sensors",
+    "now_temperature_2m",
+    "now_relative_humidity_2m",
+    "now_wind_speed_10m",
+    "now_boundary_layer_height",
+    "now_surface_pressure",
+    "now_precipitation",
+    "now_snow_depth",
+    "now_wind_dir_sin",
+    "now_wind_dir_cos",
+    "weekday_local",
+    "days_into_season",
+    "weekday_tomorrow"
+  ],
+  "risk_levels_on_calibrated_probability": [
+    [
+      0.3,
+      "low"
+    ],
+    [
+      0.6,
+      "medium"
+    ],
+    [
+      1.01,
+      "high"
+    ]
+  ],
+  "sklearn": "1.9.1",
+  "numpy": "2.4.6"
+}

@@ -1,17 +1,20 @@
 """Morning alert model: "will tomorrow be an unhealthy day?" plus tomorrow's mean PM2.5.
 
-The bot's message: sent at 08:00 Bishkek time about the next calendar day (Bishkek time).
+The bot's message: sent in the morning (~09:45 Bishkek time, see smog.forecast) about the
+next calendar day (Bishkek time). It may only use data up to 05:00 Bishkek time (23:00 UTC):
+sensor.community publishes a day's archive files at ~03:30 UTC the next morning.
 - Unhealthy day = at least ALERT_HOURS hours with city PM2.5 >= 55.4 (47% of winter days).
 - The alert threshold on the predicted probability is chosen on the TRAINING winters only
   (out-of-fold predictions), as the highest one that still catches RECALL_TARGET of their
   unhealthy days: missing a smog day is worse for people than an extra warning.
 - Every score is on a winter the model did not see (leave-one-season-out).
-- Two feature sets, as in smog.train: known at 08:00, and + perfect weather for tomorrow
+- Two feature sets, as in smog.train: known at forecast time, and + perfect weather for tomorrow
   (observed ERA5 daily values); real skill lies in between.
 
 Usage:
     py -m smog.features
-    py -m smog.alerts
+    py -m smog.alerts            # evaluation
+    py -m smog.alerts --save     # train on all winters -> models/alert.pkl for smog.forecast
 """
 import csv
 import math
@@ -26,7 +29,7 @@ from . import config
 from .evaluate_cams import load_cams
 from .features import WEATHER_COLS, load_weather
 
-ISSUE_HOUR_UTC = 2          # 08:00 in Bishkek (UTC+6)
+DATA_CUTOFF_UTC_HOUR = 23   # last hour the morning forecast can see: 05:00 Bishkek (UTC+6), previous UTC day
 LOCAL = timedelta(hours=6)
 UNHEALTHY = 55.4
 ALERT_HOURS = 3
@@ -36,7 +39,8 @@ KNOWN_COLS_SKIP = {"timestamp", "season", "hour_local", "y_24", "y_48", "weekday
 
 
 def build_days() -> list[dict]:
-    """One row per forecast: features at 08:00 local on day D, targets for day D+1 (local)."""
+    """One row per forecast made on day D: features at the data cutoff (23:00 UTC on D-1),
+    targets for day D+1 (Bishkek time)."""
     with (config.ROOT / "data" / "features.csv").open(encoding="utf-8") as f:
         table = {datetime.fromisoformat(r["timestamp"]): r for r in csv.DictReader(f)}
     city = {t: float(r["pm_now"]) for t, r in table.items()}
@@ -49,7 +53,7 @@ def build_days() -> list[dict]:
         cams = {datetime.fromisoformat(h): v for h, v in load_cams(start, end).items()}
         d = start
         while d < end:
-            issue = datetime(d.year, d.month, d.day, ISSUE_HOUR_UTC)
+            issue = datetime(d.year, d.month, d.day) - timedelta(hours=24 - DATA_CUTOFF_UTC_HOUR)
             # Local day D+1 = UTC 18:00 on D .. 17:00 on D+1.
             hours = [datetime(d.year, d.month, d.day, 18) + timedelta(hours=k) for k in range(24)]
             values = [city[h] for h in hours if h in city]
@@ -83,7 +87,7 @@ def build_days() -> list[dict]:
 def feature_sets(days: list[dict]) -> dict[str, list[str]]:
     cols = [c for c in days[0] if c not in ("date", "season") and not c.startswith(("y_", "past_"))]
     known = [c for c in cols if not c.startswith(("era5_", "cams_"))]
-    return {"at 08:00": known, "+ perfect weather": cols}
+    return {"at forecast time": known, "+ perfect weather": cols}
 
 
 def classifier():
@@ -102,18 +106,69 @@ def matrix(days, feats, mask):
     return np.array([[d[c] for c in feats] for d, m in zip(days, mask) if m])
 
 
-def choose_threshold(days, feats, train_seasons) -> float:
-    """Highest probability threshold that still catches RECALL_TARGET of the unhealthy days,
-    judged on out-of-fold predictions inside the training winters only."""
+def out_of_fold(days, feats, seasons) -> tuple[list[float], list[int]]:
+    """Probabilities for each day of `seasons` from a model trained on the other `seasons`."""
     probs, ys = [], []
-    for s in train_seasons:
-        fit = [d["season"] in train_seasons and d["season"] != s for d in days]
+    for s in seasons:
+        fit = [d["season"] in seasons and d["season"] != s for d in days]
         val = [d["season"] == s for d in days]
         m = classifier().fit(matrix(days, feats, fit), [d["y_alert"] for d, f in zip(days, fit) if f])
         probs += list(m.predict_proba(matrix(days, feats, val))[:, 1])
         ys += [d["y_alert"] for d, v in zip(days, val) if v]
+    return probs, ys
+
+
+def choose_threshold(days, feats, train_seasons) -> float:
+    """Highest probability threshold that still catches RECALL_TARGET of the unhealthy days,
+    judged on out-of-fold predictions inside the training winters only."""
+    probs, ys = out_of_fold(days, feats, train_seasons)
     bad = sorted(p for p, y in zip(probs, ys) if y)
     return bad[int(math.floor((1 - RECALL_TARGET) * len(bad)))]
+
+
+MODEL_PATH = config.ROOT / "models" / "alert.pkl"
+RISK_LEVELS = [(0.3, "low"), (0.6, "medium"), (1.01, "high")]  # on the calibrated probability
+
+
+def save_model() -> None:
+    """Train on all winters and save what the daily job needs (smog.forecast).
+
+    - classifier + alert threshold (chosen out-of-fold, as in the evaluation);
+    - calibrator: isotonic map from the raw probability to the share of unhealthy days actually
+      seen at that probability, fitted on out-of-fold predictions (the raw one is overconfident).
+      Its honesty is only proven by the live forecasts in forecasts/forecasts.csv;
+    - regressor for tomorrow's mean PM2.5.
+    """
+    import json
+    import pickle
+    import sklearn
+    from sklearn.isotonic import IsotonicRegression
+
+    days = build_days()
+    seasons = sorted({d["season"] for d in days})
+    feats = feature_sets(days)["at forecast time"]
+    probs, ys = out_of_fold(days, feats, seasons)
+    calibrator = IsotonicRegression(y_min=0, y_max=1, out_of_bounds="clip").fit(probs, ys)
+    everything = [True] * len(days)
+    bundle = {
+        "features": feats,
+        "classifier": classifier().fit(matrix(days, feats, everything), [d["y_alert"] for d in days]),
+        "threshold": choose_threshold(days, feats, seasons),
+        "calibrator": calibrator,
+        "regressor": regressor().fit(matrix(days, feats, everything), [d["y_mean"] for d in days]),
+    }
+    meta = {
+        "trained_on_seasons": seasons, "days": len(days), "threshold": round(bundle["threshold"], 3),
+        "unhealthy_day": f">= {ALERT_HOURS} h with city PM2.5 >= {UNHEALTHY}",
+        "data_cutoff": f"{DATA_CUTOFF_UTC_HOUR}:00 UTC of the previous day", "features": feats,
+        "risk_levels_on_calibrated_probability": RISK_LEVELS,
+        "sklearn": sklearn.__version__, "numpy": np.__version__,
+    }
+    MODEL_PATH.parent.mkdir(exist_ok=True)
+    with MODEL_PATH.open("wb") as f:
+        pickle.dump(bundle, f)
+    MODEL_PATH.with_suffix(".json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
+    print(f"Saved {MODEL_PATH} (threshold {bundle['threshold']:.3f}, {len(days)} days, seasons {seasons})")
 
 
 def alert_scores(alert: list[bool], y: list[int]) -> dict:
@@ -129,6 +184,9 @@ def alert_line(name: str, s: dict) -> str:
 
 
 def main() -> None:
+    import sys
+    if "--save" in sys.argv:
+        return save_model()
     days = build_days()
     seasons = sorted({d["season"] for d in days})
     print(f"Days scored: {len(days)}; unhealthy (>= {ALERT_HOURS} h >= {UNHEALTHY}): "
@@ -185,8 +243,8 @@ def main() -> None:
                                    for a, b in zip(p["mean_pred"], p["mean_y"]))
             print(f"  {name:30s} MAE={statistics.mean(abs(e) for e in err):5.1f} bias={statistics.mean(err):+5.1f} "
                   f"same category={same:.0%}")
-    print("Is the probability honest? (model at 08:00; predicted vs observed share of unhealthy days)")
-    p = pooled["model, at 08:00"]
+    print("Is the probability honest? (model at forecast time; predicted vs observed share of unhealthy days)")
+    p = pooled["model, at forecast time"]
     for lo, hi in [(0, .2), (.2, .4), (.4, .6), (.6, .8), (.8, 1.01)]:
         b = [(q, y) for q, y in zip(p["prob"], p["y"]) if lo <= q < hi]
         if b:

@@ -19,33 +19,38 @@ from . import config, humidity
 from .backfill import add_range_args, daterange, ranges_from_args
 
 
-def sensor_hourly_pm25(start: date, end: date) -> tuple[dict[str, dict[str, float]], dict[str, str]]:
-    """Each sensor's hourly-mean PM2.5: ({sensor_id: {'YYYY-MM-DDTHH:00:00': value}}, {sensor_id: type})."""
+def per_sensor_hourly(rows) -> tuple[dict[str, dict[str, float]], dict[str, str]]:
+    """Each sensor's hourly-mean PM2.5 from raw readings ({sensor_id, timestamp, pm25[, sensor_type]}):
+    ({sensor_id: {'YYYY-MM-DDTHH:00:00': value}}, {sensor_id: type}). Shared with smog.forecast,
+    so the daily forecast sees the city exactly as the models were trained on it."""
     readings = defaultdict(lambda: defaultdict(list))
     sensor_types = {}
-    for day in daterange(start, end):
-        path = config.RAW_DIR / "sensors" / f"{day}.csv"
-        if not path.exists():
+    for r in rows:
+        pm25 = float(r["pm25"])
+        if not 0 <= pm25 < 1000:  # drop obvious sensor faults
             continue
-        with path.open(encoding="utf-8") as f:
-            for r in csv.DictReader(f):
-                pm25 = float(r["pm25"])
-                if not 0 <= pm25 < 1000:  # drop obvious sensor faults
-                    continue
-                readings[r["sensor_id"]][r["timestamp"][:13] + ":00:00"].append(pm25)
-                # Files from before the sensor_type column: all Bishkek sensors then were SDS011.
-                sensor_types[r["sensor_id"]] = r.get("sensor_type") or config.KNOWN_SENSORS.get(
-                    int(r["sensor_id"]), "SDS011")
+        sid = str(r["sensor_id"])
+        readings[sid][r["timestamp"][:13] + ":00:00"].append(pm25)
+        # Files from before the sensor_type column: all Bishkek sensors then were SDS011.
+        sensor_types[sid] = r.get("sensor_type") or config.KNOWN_SENSORS.get(int(sid), "SDS011")
     means = {sid: {h: statistics.mean(v) for h, v in hours.items()} for sid, hours in readings.items()}
     return means, sensor_types
 
 
-def hourly_city_pm25(start: date, end: date, rh: dict[str, float] | None = None) -> dict[str, float]:
-    """Median across sensors of each sensor's hourly-mean PM2.5. Key: 'YYYY-MM-DDTHH:00:00'.
+def sensor_hourly_pm25(start: date, end: date) -> tuple[dict[str, dict[str, float]], dict[str, str]]:
+    """per_sensor_hourly() over the downloaded sensor files of a date range."""
+    def rows():
+        for day in daterange(start, end):
+            path = config.RAW_DIR / "sensors" / f"{day}.csv"
+            if path.exists():
+                with path.open(encoding="utf-8") as f:
+                    yield from csv.DictReader(f)
+    return per_sensor_hourly(rows())
 
-    With rh (hour -> relative humidity %), SDS011 hourly means are humidity-corrected.
-    """
-    per_sensor, sensor_types = sensor_hourly_pm25(start, end)
+
+def city_median(per_sensor: dict[str, dict[str, float]], sensor_types: dict[str, str] | None = None,
+                rh: dict[str, float] | None = None) -> dict[str, float]:
+    """Median across sensors per hour, hours with >= 2 sensors. With rh, SDS011 values are humidity-corrected."""
     by_hour = defaultdict(list)
     for sid, hours in per_sensor.items():
         for hour, value in hours.items():
@@ -54,6 +59,15 @@ def hourly_city_pm25(start: date, end: date, rh: dict[str, float] | None = None)
             by_hour[hour].append(value)
     # Median is robust to one broken or badly placed sensor.
     return {h: statistics.median(v) for h, v in by_hour.items() if len(v) >= 2}
+
+
+def hourly_city_pm25(start: date, end: date, rh: dict[str, float] | None = None) -> dict[str, float]:
+    """Median across sensors of each sensor's hourly-mean PM2.5. Key: 'YYYY-MM-DDTHH:00:00'.
+
+    With rh (hour -> relative humidity %), SDS011 hourly means are humidity-corrected.
+    """
+    per_sensor, sensor_types = sensor_hourly_pm25(start, end)
+    return city_median(per_sensor, sensor_types, rh)
 
 
 def load_cams(start: date, end: date) -> dict[str, float]:
