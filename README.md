@@ -20,6 +20,13 @@ py -m smog.evaluate_cams --start 2025-11-01 --end 2026-02-28
 ```
 Все отопительные сезоны с 2022/23: `py -m smog.backfill --all-seasons`, затем `py -m smog.evaluate_cams --all-seasons`.
 
+Первая модель прогноза (нужны `numpy` и `scikit-learn`):
+```
+pip install -r requirements.txt
+py -m smog.features
+py -m smog.train
+```
+
 ## Данные
 - [sensor.community](https://sensor.community) — народные датчики PM2.5
 - [Open-Meteo](https://open-meteo.com) — погода (ERA5) и глобальная модель CAMS

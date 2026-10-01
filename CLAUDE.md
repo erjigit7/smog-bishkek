@@ -30,7 +30,8 @@ forecast "PM2.5 at t+24h = PM2.5 now" (persistence; `py -m smog.features`, all 4
 
 ## Conventions
 - All timestamps UTC in storage and code; convert to Asia/Bishkek (UTC+6) only for display.
-- Data layer (`smog/sources.py`, `smog/backfill.py`) uses the standard library only.
+- Data layer (`smog/sources.py`, `smog/backfill.py`) uses the standard library only. Modelling (`smog/train.py`) uses numpy + scikit-learn (`requirements.txt`).
+- Never tune or select anything on a test winter: score on winters the model did not see (leave-one-season-out, or train ≤2024/25 / test 2025/26).
 - Run modules as `py -m smog.<module>` (Windows) or `python -m smog.<module>`.
 - `data/` is not committed; recreate with `smog.backfill`.
 - Be polite to sensor.community (volunteer-run): keep the delay between requests.
@@ -44,6 +45,7 @@ py -m smog.backfill --all-seasons        # or --season 2022, or --start/--end
 py -m smog.evaluate_cams --all-seasons   # raw + humidity-corrected, prints a Markdown table
 py -m smog.backfill --season 2021 && py -m smog.compare_reference --season 2021 --season 2022   # sensors vs embassy
 py -m smog.features                      # data/features.csv: one row per hour, targets y_24 / y_48
+pip install -r requirements.txt && py -m smog.train   # first model vs persistence and CAMS
 ```
 
 ## Feature table (`smog/features.py`)
@@ -51,6 +53,28 @@ py -m smog.features                      # data/features.csv: one row per hour, 
 - `pm_*`, `now_*`, calendar columns are known at forecast time.
 - `era5_24_*`, `era5_48_*`, `cams_*` are OBSERVED weather at the target hour, i.e. a perfect weather forecast. Archived day-ahead forecasts (Open-Meteo previous-runs API) have no boundary layer height at all and most other variables only from winter 2024/25. Always score models with and without these columns; real skill lies in between.
 - ERA5 boundary layer height is missing in Open-Meteo for Jan–Feb 2024 (also with `models=era5`); left empty.
+
+## First model (`smog/train.py`)
+Gradient boosting (scikit-learn `HistGradientBoostingRegressor`, fixed settings, nothing tuned on test winters).
+Output of `py -m smog.train` (2026-10-01), hourly city median PM2.5, leave-one-season-out over all 4 winters (each winter predicted by a model trained on the other three):
+
+| Horizon | Method | MAE | Bias | Same category | Unhealthy caught | False alarms |
+|---|---|---|---|---|---|---|
+| +24h | persistence | 23.1 | -0.2 | 44% | 1178 of 2384 | 1181 |
+| +24h | CAMS | 26.4 | -24.8 | 39% | 0 of 2384 | 0 |
+| +24h | model, at forecast time | 21.0 | -1.4 | 46% | 1000 of 2384 | 767 |
+| +24h | model, + perfect weather | 18.8 | -1.4 | 49% | 1153 of 2384 | 789 |
+| +48h | persistence | 28.1 | -0.4 | 38% | 870 of 2374 | 1450 |
+| +48h | CAMS | 26.5 | -25.0 | 39% | 0 of 2374 | 0 |
+| +48h | model, at forecast time | 22.8 | -1.6 | 43% | 834 of 2374 | 794 |
+| +48h | model, + perfect weather | 20.0 | -2.0 | 48% | 1037 of 2374 | 806 |
+
+Main test (train 2022/23..2024/25, test 2025/26), +24h: persistence MAE 25.6, CAMS 24.3, model 21.0 (at forecast time) / 18.2 (+ perfect weather); +48h: 30.4, 24.4, 23.8 / 19.1.
+
+Notes:
+- The model beats persistence and CAMS on MAE at both horizons, but catches FEWER unhealthy hours than persistence (it smooths peaks). For alerts this is the next thing to fix (e.g. predict P(PM2.5 ≥ 55.4), choose the threshold on training winters only).
+- Real skill with a real weather forecast lies between "at forecast time" and "+ perfect weather".
+- Most useful inputs (+24h, permutation importance on 2025/26): surface pressure, hour of day, PM2.5 now, temperature.
 
 ## CAMS baseline by season
 Output of `py -m smog.evaluate_cams --all-seasons` (2026-09-30). City value = median of the sensors' hourly means, hours with ≥ 2 sensors.
@@ -84,7 +108,7 @@ Output of `py -m smog.compare_reference --season 2021 --season 2022` (2026-09-30
 2. [x] CAMS baseline evaluation
 3. [x] Backfill earlier winters (2022–2025), humidity correction for SDS011 (gamma fitted against the embassy reference)
 4. [x] Feature table: weather + lagged PM + hour/weekday/heating-season flags (`smog.features`)
-5. [ ] First model (gradient boosting) for city PM2.5 at +24h/+48h; compare with baseline
+5. [x] First model (gradient boosting) for city PM2.5 at +24h/+48h; compare with baseline (`smog.train`; next: alert-oriented model, daily summary)
 6. [ ] Daily forecast job + storage
 7. [ ] Telegram bot (RU/KG): daily morning forecast, alerts, "when to ventilate"
 8. [ ] Per-district forecasts once enough sensors
