@@ -46,6 +46,7 @@ py -m smog.evaluate_cams --all-seasons   # raw + humidity-corrected, prints a Ma
 py -m smog.backfill --season 2021 && py -m smog.compare_reference --season 2021 --season 2022   # sensors vs embassy
 py -m smog.features                      # data/features.csv: one row per hour, targets y_24 / y_48
 pip install -r requirements.txt && py -m smog.train   # first model vs persistence and CAMS
+py -m smog.alerts                        # morning alert: "tomorrow >= 3 unhealthy hours?" + tomorrow's mean
 ```
 
 ## Feature table (`smog/features.py`)
@@ -75,6 +76,23 @@ Notes:
 - The model beats persistence and CAMS on MAE at both horizons, but catches FEWER unhealthy hours than persistence (it smooths peaks). For alerts this is the next thing to fix (e.g. predict P(PM2.5 ≥ 55.4), choose the threshold on training winters only).
 - Real skill with a real weather forecast lies between "at forecast time" and "+ perfect weather".
 - Most useful inputs (+24h, permutation importance on 2025/26): surface pressure, hour of day, PM2.5 now, temperature.
+
+## Alert model (`smog/alerts.py`)
+The bot's morning message: issued 08:00 Bishkek time about the next calendar day. Unhealthy day = ≥ 3 hours with city PM2.5 ≥ 55.4 (222 of 472 winter days, 47%). Probability threshold chosen on the training winters only (out-of-fold), the highest one that still catches 80% of their unhealthy days.
+Output of `py -m smog.alerts` (2026-10-01), leave-one-season-out, all 4 winters:
+
+| Method | Unhealthy days caught | False alarms | Right when it warns | Tomorrow's mean: MAE | Same category |
+|---|---|---|---|---|---|
+| persistence (yesterday) | 132 of 222 (59%) | 87 of 250 | 60% | 20.1 | 52% |
+| CAMS | 0 of 222 | 0 | — | 24.9 | 39% |
+| model, at 08:00 | 174 of 222 (78%) | 132 of 250 | 57% | 16.8 | 56% |
+| model, + perfect weather | 176 of 222 (79%) | 90 of 250 | 66% | 15.0 | 61% |
+
+Notes:
+- With the same number of warnings as persistence (219), the model catches 140 vs 132 and raises 79 vs 87 false alarms: better, but modestly. Its extra catches come mostly from warning more often, by design.
+- Not uniform: in 2025/26 the 08:00 model caught 32 of 58 (55%) vs persistence 36 (62%).
+- The probability is not calibrated (days with P 0–0.2 were unhealthy 29% of the time, P 0.8–1.0 only 74%). Do not show raw percentages to users; use words (low / medium / high) until it is calibrated.
+- Tomorrow's mean PM2.5: the model beats persistence and CAMS clearly (MAE 16.8 vs 20.1 vs 24.9).
 
 ## CAMS baseline by season
 Output of `py -m smog.evaluate_cams --all-seasons` (2026-09-30). City value = median of the sensors' hourly means, hours with ≥ 2 sensors.
