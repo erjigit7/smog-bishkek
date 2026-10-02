@@ -51,6 +51,7 @@ py -m smog.alerts                        # morning alert: "tomorrow >= 3 unhealt
 py -m smog.alerts --save                 # train on all winters -> models/alert.pkl (+ alert.json)
 py -m smog.forecast                      # the daily job: verify past forecasts, forecast tomorrow
 py -m smog.forecast --date 2026-01-20 --dry-run   # as if run that morning
+py -m smog.forecast --date 2026-01-20 --test-send # also posts it to the Telegram channel, marked TEST (needs TELEGRAM_* env)
 ```
 
 ## Feature table (`smog/features.py`)
@@ -107,6 +108,14 @@ Notes:
 - Weather "now" comes from the Open-Meteo forecast API (ERA5 is ~5 days late); training used ERA5. Small, accepted mismatch.
 - Live accuracy = compare risk/alert/mean_pm25 with observed_* in `forecasts/forecasts.csv`. Retrain after each winter: `py -m smog.features && py -m smog.alerts --save`.
 
+## Telegram channel (`smog/telegram.py`, called by `smog/forecast.py`)
+- Variant A of roadmap item 7: the daily job posts to a public channel; the bot cannot answer commands (that needs a server running 24/7, a later decision). Standard library only.
+- Secrets `TELEGRAM_BOT_TOKEN` (@BotFather) and `TELEGRAM_CHANNEL` (`@name`) live in GitHub repository secrets, never in code or in the repo. Without them the job only prints. The bot must be a channel admin allowed to post. Error text is scrubbed of the token.
+- One post = Russian, separator, Kyrgyz: risk word, tomorrow's mean PM2.5 and category, the alert text (only with an alert), "when to ventilate" (only with medium/high risk or an alert), a line checking yesterday's forecast against what was observed (only when it was verified), a note that the sensors read low. The Kyrgyz text was written by a model: needs a native reader.
+- "When to ventilate" is the typical winter day, not a forecast: city median PM2.5 by Bishkek hour over 4 winters is ~17–18 at 05–08 h and ~21–22 at 12–15 h, but ~40–46 at 18–23 h (31–39% of those hours unhealthy). The model has no hourly forecast.
+- Never posts: "no forecast" rows, forecasts forced outside Nov–Feb. A post is recorded in `forecasts.csv` (`sent_at_utc`): a re-run does not post twice, a failed post is retried by the next run and turns the run red.
+- Test without publishing a real forecast: Actions → Daily smog forecast → Run workflow → `test_date` = a past winter date (posts that day's forecast marked TEST, saves nothing). Tested locally against a fake Telegram server (send, 4xx without retry, 5xx/429 retries, token never in errors, no double post), not yet against the real API.
+
 ## CAMS baseline by season
 Output of `py -m smog.evaluate_cams --all-seasons` (2026-09-30). City value = median of the sensors' hourly means, hours with ≥ 2 sensors.
 Sensors: all 11 Bishkek SDS011 in `KNOWN_SENSORS`, 3–10 reporting per day.
@@ -141,5 +150,5 @@ Output of `py -m smog.compare_reference --season 2021 --season 2022` (2026-09-30
 4. [x] Feature table: weather + lagged PM + hour/weekday/heating-season flags (`smog.features`)
 5. [x] First model (gradient boosting) for city PM2.5 at +24h/+48h; compare with baseline (`smog.train`; next: alert-oriented model, daily summary)
 6. [x] Daily forecast job + storage (`smog.forecast`, GitHub Actions, `forecasts/forecasts.csv` with live verification)
-7. [ ] Telegram bot (RU/KG): daily morning forecast, alerts, "when to ventilate"
+7. [~] Telegram (RU/KG): channel with the daily morning post, alert and "when to ventilate" is built (`smog.telegram`); an interactive bot (commands, personal alerts) is not
 8. [ ] Per-district forecasts once enough sensors

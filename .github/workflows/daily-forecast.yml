@@ -1,5 +1,6 @@
 # Daily morning forecast for tomorrow (roadmap item 6), see smog/forecast.py.
 # Commits forecasts/forecasts.csv: each new forecast, and later what actually happened.
+# Posts the forecast to the Telegram channel (secrets TELEGRAM_BOT_TOKEN, TELEGRAM_CHANNEL; smog/telegram.py).
 name: Daily smog forecast
 
 on:
@@ -12,6 +13,10 @@ on:
         description: "Forecast even outside the heating season (the model only knows Nov-Feb)"
         type: boolean
         default: false
+      test_date:
+        description: "Test post: a past date, e.g. 2026-01-20. Posts that day's forecast to Telegram marked TEST, saves nothing"
+        type: string
+        default: ""
 
 permissions:
   contents: write
@@ -29,7 +34,20 @@ jobs:
           python-version: "3.11"
           cache: pip
       - run: pip install -r requirements.txt
-      - run: python -m smog.forecast ${{ inputs.force && '--force' || '' }}
+      - name: Forecast and post to Telegram
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHANNEL: ${{ secrets.TELEGRAM_CHANNEL }}
+          FORCE: ${{ inputs.force }}
+          TEST_DATE: ${{ inputs.test_date }}  # via env, not pasted into the command line
+        run: |
+          if [ -n "$TEST_DATE" ]; then
+            python -m smog.forecast --date "$TEST_DATE" --test-send
+          elif [ "$FORCE" = "true" ]; then
+            python -m smog.forecast --force
+          else
+            python -m smog.forecast
+          fi
       - name: Commit forecasts
         if: always()  # also after a failed forecast: keeps the verification and the "no forecast" row
         run: |
