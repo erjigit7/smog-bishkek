@@ -31,6 +31,7 @@ py -m smog.train
 ```
 py -m smog.forecast --date 2026-01-20 --dry-run
 ```
+Тот же запуск публикует прогноз в Telegram-канале на русском и кыргызском (`smog/telegram.py`). Токен бота и канал берутся только из секретов репозитория `TELEGRAM_BOT_TOKEN` и `TELEGRAM_CHANNEL`.
 
 ## Данные
 - [sensor.community](https://sensor.community) — народные датчики PM2.5

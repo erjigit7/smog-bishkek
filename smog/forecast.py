@@ -8,11 +8,17 @@ as in its evaluation (smog.alerts).
    of the live forecasts can be checked (forecasts/forecasts.csv, committed by the job).
 2. Build the model inputs from the archive + Open-Meteo, the same way smog.features did.
 3. Predict tomorrow: unhealthy-day alert, risk level, tomorrow's mean PM2.5; append a row.
+4. Post it to the Telegram channel.
 
 Usage:
     py -m smog.forecast                               # does nothing outside the heating season
     py -m smog.forecast --force                       # also outside it (model trained on Nov-Feb only)
     py -m smog.forecast --date 2026-01-15 --dry-run   # as if run that morning; prints, saves nothing
+    py -m smog.forecast --date 2026-01-15 --test-send # same, and posts it to the Telegram channel marked TEST
+
+After a successful forecast the job posts it to the Telegram channel (smog.telegram); without the
+TELEGRAM_* secrets it only prints. The post is recorded in forecasts.csv (sent_at_utc), so a re-run never
+posts twice and a failed post is retried on the next run.
 """
 import argparse
 import csv
@@ -23,7 +29,7 @@ import statistics
 import time
 from datetime import date, datetime, timedelta, timezone
 
-from . import config, sources
+from . import config, sources, telegram
 from .alerts import ALERT_HOURS, DATA_CUTOFF_UTC_HOUR, MIN_HOURS, MODEL_PATH, RISK_LEVELS, UNHEALTHY
 from .evaluate_cams import city_median, per_sensor_hourly
 
@@ -31,7 +37,7 @@ LOCAL = timedelta(hours=6)
 OUT = config.ROOT / "forecasts" / "forecasts.csv"
 COLUMNS = ["issued_at_utc", "run_date", "target_date", "data_until_utc", "status", "p_raw", "p_calibrated",
            "risk", "alert", "mean_pm25", "category", "pm_at_cutoff", "n_sensors", "model_trained_on",
-           "observed_unhealthy_h", "observed_mean", "observed_unhealthy_day", "note"]
+           "observed_unhealthy_h", "observed_mean", "observed_unhealthy_day", "sent_at_utc", "note"]
 RISK_RU = {"low": "низкий", "medium": "средний", "high": "высокий"}
 CATEGORY_RU = {"good": "хорошо", "moderate": "умеренно", "unhealthy_sensitive": "вредно для чувствительных",
                "unhealthy": "вредно", "very_unhealthy": "очень вредно", "hazardous": "опасно"}
@@ -167,12 +173,44 @@ def message_ru(target: date, p: dict) -> str:
     return "\n".join(lines)
 
 
+def publish(rows: list[dict], target: date, now: datetime) -> bool:
+    """Post tomorrow's forecast to the Telegram channel once. False if posting failed."""
+    row = next((r for r in rows if r["target_date"] == target.isoformat() and r["status"] == "ok"), None)
+    if row is None or row.get("sent_at_utc"):
+        return True
+    if row["note"]:  # forced outside the heating season: the model knows nothing there, never publish
+        print("Not posting a forecast made outside the heating season.")
+        return True
+    if not telegram.configured():
+        print("TELEGRAM_BOT_TOKEN / TELEGRAM_CHANNEL not set: not posting.")
+        return True
+    # The day that just ended (the run is on the morning of target - 1), if it was verified above.
+    ended = (target - timedelta(days=2)).isoformat()
+    yesterday = next((r for r in rows if r["target_date"] == ended and r["status"] == "ok"
+                      and r["observed_mean"] != ""), None)
+    try:
+        telegram.send(telegram.build_message(target, row, yesterday))
+    except telegram.SendError as e:
+        print(f"Telegram post failed: {e}")  # SendError never contains the token
+        return False
+    row["sent_at_utc"] = now.isoformat(timespec="minutes")
+    save_rows(rows)
+    print("Posted to the Telegram channel.")
+    return True
+
+
 def main() -> None:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--date", type=date.fromisoformat, help="run as if on this UTC date")
     p.add_argument("--force", action="store_true", help="forecast also outside the heating season")
     p.add_argument("--dry-run", action="store_true", help="print only, do not touch forecasts.csv")
+    p.add_argument("--test-send", action="store_true",
+                   help="with --date: also post that (past) forecast to Telegram, marked TEST; implies --dry-run")
     args = p.parse_args()
+    if args.test_send:
+        if not args.date:
+            p.error("--test-send needs --date (a past date: the post is marked as a test)")
+        args.dry_run = True
     now = datetime.now(timezone.utc).replace(tzinfo=None)
     today = now.date()
     run_date = args.date or today
@@ -197,6 +235,7 @@ def main() -> None:
 
     # 2-3. Tomorrow's forecast.
     failed = False
+    new_row = None
     if any(r["target_date"] == target.isoformat() and r["status"] == "ok" for r in rows):
         print(f"A forecast for {target} already exists; not adding another.")
     elif not in_season(target) and not args.force:
@@ -227,11 +266,22 @@ def main() -> None:
                 print(message_ru(target, row))
             print("Inputs:", {k: (round(v, 2) if isinstance(v, float) else v) for k, v in x.items()})
         rows.append(row)
+        new_row = row
 
+    posted = True
     if not args.dry_run:
         save_rows(rows)
         print(f"Saved {OUT} ({len(rows)} rows)")
-    if failed:
+        posted = publish(rows, target, now)
+    elif args.test_send:
+        if new_row is None or new_row["status"] != "ok":
+            raise SystemExit("No forecast to post for that date.")
+        try:
+            telegram.send(telegram.build_message(target, new_row, test_day=target))
+        except telegram.SendError as e:
+            raise SystemExit(f"Test post failed: {e}")
+        print("Test post sent to the Telegram channel.")
+    if failed or not posted:
         raise SystemExit(1)  # red run in GitHub Actions -> the owner gets an e-mail; the CSV is still committed
 
 
