@@ -1,1 +1,2 @@
 issued_at_utc,run_date,target_date,data_until_utc,status,p_raw,p_calibrated,risk,alert,mean_pm25,category,pm_at_cutoff,n_sensors,model_trained_on,observed_unhealthy_h,observed_mean,observed_unhealthy_day,sent_at_utc,note
+2026-10-31T09:57,2026-10-31,2026-11-01,2026-10-30T23:00:00,ok,0.723,0.52,medium,1,56,unhealthy,51.9,6,2022+2023+2024+2025,,,,,
