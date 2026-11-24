@@ -23,3 +23,4 @@ issued_at_utc,run_date,target_date,data_until_utc,status,p_raw,p_calibrated,risk
 2026-11-21T11:46,2026-11-21,2026-11-22,2026-11-20T23:00:00,ok,0.043,0.31,medium,0,24,moderate,4.0,4,2022+2023+2024+2025,3,27,1,,
 2026-11-22T11:58,2026-11-22,2026-11-23,2026-11-21T23:00:00,ok,0.402,0.34,medium,1,31,moderate,16.4,4,2022+2023+2024+2025,,,,,
 2026-11-23T13:39,2026-11-23,2026-11-24,2026-11-22T23:00:00,ok,0.319,0.34,medium,1,26,moderate,15.2,4,2022+2023+2024+2025,,,,,
+2026-11-24T14:16,2026-11-24,2026-11-25,,no forecast: data source unavailable (<urlopen error _ssl.c:1001: The handshake operation timed out>),,,,,,,,,2022+2023+2024+2025,,,,,
