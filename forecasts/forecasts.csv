@@ -26,3 +26,4 @@ issued_at_utc,run_date,target_date,data_until_utc,status,p_raw,p_calibrated,risk
 2026-11-24T14:16,2026-11-24,2026-11-25,,no forecast: data source unavailable (<urlopen error _ssl.c:1001: The handshake operation timed out>),,,,,,,,,2022+2023+2024+2025,,,,,
 2026-11-25T13:29,2026-11-25,2026-11-26,,no forecast: data source unavailable (<urlopen error [Errno 101] Network is unreachable>),,,,,,,,,2022+2023+2024+2025,,,,,
 2026-11-26T13:08,2026-11-26,2026-11-27,2026-11-25T23:00:00,ok,0.038,0.31,medium,0,21,moderate,3.8,5,2022+2023+2024+2025,,,,,
+2026-11-27T13:06,2026-11-27,2026-11-28,2026-11-26T23:00:00,ok,0.222,0.34,medium,1,31,moderate,3.0,5,2022+2023+2024+2025,,,,,
